@@ -25,9 +25,6 @@
 -export([event/2]).
 -export([get_rememberme_cookie/1, set_rememberme_cookie/2, reset_rememberme_cookie/1]).
 
-%% Convenience export for other modules.
--export([logon/2, reminder/2, expired/2, reset/2]).
-
 %% Convenience export for other auth implementations.
 -export([send_reminder/2, lookup_identities/2]).
 
@@ -165,18 +162,60 @@ event(#postback{message={send_verification, [{user_id, UserId}]}}, Context) ->
         _Other -> logon_stage("verification_error", Context)
     end;
 
-event(#submit{message=[], form="password_expired"}, Context) ->
-    Args = z_context:get_q_all(Context),
-    expired(Args, Context);
+event(#submit{message=[], form="password_expired"}=S, Context) ->
+    event(S#submit{form="password_reset"}, Context);
 
 event(#submit{message=[], form="password_reset"}, Context) ->
-    Args = z_context:get_q_all(Context),
-    reset(Args, Context);
+    Secret = z_context:get_q("secret", Context),
+    Password1 = z_string:trim(z_context:get_q("password_reset1", Context)),
+    Password2 = z_string:trim(z_context:get_q("password_reset2", Context)),
+    case {Password1,Password2} of
+        {A,_} when length(A) < 6 ->
+            logon_error("tooshort", Context);
+        {P,P} ->
+            {ok, UserId} = get_by_reminder_secret(Secret, Context),
+            case m_identity:get_username(UserId, Context) of
+                undefined ->
+                    throw({error, "User does not have an username defined."});
+                Username ->
+                    ContextLoggedon = logon_user(UserId, Context),
+                    delete_reminder_secret(UserId, ContextLoggedon),
+                    m_identity:set_username_pw(UserId, Username, Password1, ContextLoggedon),
+                    ContextLoggedon
+            end;
+        {_,_} ->
+            logon_error("unequal", Context)
+    end;
 
-%%@doc Handle submit form post.
+    event(#submit{message=[], form="login_verified"}, Context) ->
+    Secret = z_context:get_q("uuid", Context),
+		
+		{ok, UserId} = get_uuid(Secret, Context),
+        
+        case m_identity:get_username(UserId, Context) of
+            undefined ->
+                throw({error, "User does not have an username defined."});
+            _Else ->
+                ContextLoggedon = logon_user(UserId, Context),
+                delete_uuid(UserId, ContextLoggedon),
+                ContextLoggedon
+        end;
+    
+
 event(#submit{message=[], form="password_reminder"}, Context) ->
-    Args = z_context:get_q_all(Context),
-    reminder(Args, Context);
+    case z_string:trim(z_context:get_q("reminder_address", Context, [])) of
+        [] ->
+            logon_error("reminder", Context);
+        Reminder ->
+            case lookup_identities(Reminder, Context) of
+                [] -> 
+                    logon_error("reminder", Context);
+                Identities ->
+                    % @todo TODO check if reminder could be sent (maybe there is no e-mail address)
+                    send_reminder(Identities, Context),
+                    logon_stage("reminder_sent", Context)
+            end
+    end;
 
 event(#submit{message={logon_confirm, Args}, form="logon_confirm_form"}, Context) ->
     LogonArgs = [{"username", binary_to_list(m_identity:get_username(Context))}
@@ -192,10 +231,20 @@ event(#submit{message={logon_confirm, Args}, form="logon_confirm_form"}, Context
             z_render:growl_error("Configuration error: please enable a module for #logon_submit{}", Context)
     end;
 
-%%@doc Handle submit form post.
 event(#submit{message=[]}, Context) ->
     Args = z_context:get_q_all(Context),
-    logon(Args, Context);
+    case z_notifier:first(#logon_submit{query_args=Args}, Context) of
+        {ok, UserId} when is_integer(UserId) -> 
+            % send the email to the user for mfa
+            send_mfa(UserId, Context);
+        {error, _Reason} -> 
+            logon_error("pw", Context);
+        {expired, UserId} when is_integer(UserId) ->
+            logon_stage("password_expired", [{user_id, UserId}, {secret, set_reminder_secret(UserId, Context)}], Context);
+        undefined -> 
+            ?zWarning("Auth module error: #logon_submit{} returned undefined.", Context),
+            logon_error("pw", Context)
+    end;
 
 event(#z_msg_v1{data=Data}, Context) when is_list(Data) ->
     case proplists:get_value(<<"msg">>, Data) of
@@ -207,74 +256,14 @@ event(#z_msg_v1{data=Data}, Context) when is_list(Data) ->
             Context
     end.
 
-%%@doc Handle submit data.
-logon(Args, Context) ->
-    case z_notifier:first(#logon_submit{query_args=Args}, Context) of
-        {ok, UserId} when is_integer(UserId) -> 
-            logon_user(UserId, Context);
-        {error, _Reason} -> 
-            logon_error("pw", Context);
-        {expired, UserId} when is_integer(UserId) ->
-            logon_stage("password_expired", [{user_id, UserId}, {secret, set_reminder_secret(UserId, Context)}], Context);
-        undefined -> 
-            ?zWarning("Auth module error: #logon_submit{} returned undefined.", Context),
-            logon_error("pw", Context)
-    end.
-
-%%@doc Handle submit data.  
-reminder(Args, Context) ->
-    case z_string:trim(proplists:get_value("reminder_address", Args, [])) of
-        [] ->
-            logon_error("reminder", Context);
-        Reminder ->
-            case lookup_identities(Reminder, Context) of
-                [] -> 
-                    logon_error("reminder", Context);
-                Identities ->
-                    % @todo TODO check if reminder could be sent (maybe there is no e-mail address)
-                    send_reminder(Identities, Context),
-                    logon_stage("reminder_sent", Context)
-            end
-    end.
-
-
-expired(Args, Context) ->
-    reset(Args, Context).
-
-
-reset(Args, Context) ->
-    Secret = proplists:get_value("secret", Args),
-    Password1 = z_string:trim(proplists:get_value("password_reset1", Args)),
-    Password2 = z_string:trim(proplists:get_value("password_reset2", Args)),
-    PasswordMinLength = z_convert:to_integer(m_config:get_value(mod_authentication, password_min_length, "6", Context)),
-    
-    case {Password1,Password2} of
-        {A,_} when length(A) < PasswordMinLength ->
-            logon_error("tooshort", Context);
-        {P,P} ->
-            {ok, UserId} = get_by_reminder_secret(Secret, Context),
-            case m_identity:get_username(UserId, Context) of
-                undefined ->
-                    throw({error, "User does not have an username defined."});
-                Username ->
-                    ContextLoggedon = logon_user(UserId, Context),
-                    delete_reminder_secret(UserId, ContextLoggedon),
-                    m_identity:set_username_pw(UserId, Username, Password1, ContextLoggedon),
-                    ContextLoggedon
-            end;
-        {_,_} ->
-            logon_error("unequal", Context)
-    end.
-
-
 logon_error(Reason, Context) ->
     Context1 = z_render:set_value("password", "", Context),
-    Context2 = z_render:wire({add_class, [{target, "signup_logon_box"}, {class, "z-logon-error"}]}, Context1),
+    Context2 = z_render:wire({add_class, [{target, "logon_box"}, {class, "logon_error"}]}, Context1),
     z_render:update("logon_error", z_template:render("_logon_error.tpl", [{reason, Reason}], Context2), Context2).
 
 
 remove_logon_error(Context) ->
-    z_render:wire({remove_class, [{target, "signup_logon_box"}, {class, "z-logon-error"}]}, Context).
+    z_render:wire({remove_class, [{target, "logon_box"}, {class, "logon_error"}]}, Context).
 
 
 logon_stage(Stage, Context) ->
@@ -282,7 +271,7 @@ logon_stage(Stage, Context) ->
 
 logon_stage(Stage, Args, Context) ->
     Context1 = remove_logon_error(Context),
-    z_render:update("signup_logon_box", z_template:render("_logon_stage.tpl", [{stage, Stage}|Args], Context1), Context1).
+    z_render:update("logon_form", z_template:render("_logon_stage.tpl", [{stage, Stage}|Args], Context1), Context1).
     
 
 logon_user(UserId, Context) ->
@@ -460,6 +449,36 @@ send_reminder([Id|Ids], Context, Acc) ->
             end
     end.
 
+send_mfa(Ids, Context) ->
+    case send_mfa(Ids, z_acl:sudo(Context), []) of
+        [] -> {error, no_email};
+        _ -> ok
+    end.
+
+send_mfa([Id|Ids], Context, Acc) ->
+    case find_email(Id, Context) of
+        undefined -> 
+            send_mfa(Ids, Context, Acc);
+        Email -> 
+            case m_identity:get_username(Id, Context) of
+                undefined ->
+                    send_mfa(Ids, Context, Acc);
+                <<"admin">> ->
+                    send_mfa(Ids, Context, Acc);
+                Username ->
+                    Vars = [
+                        {recipient_id, Id},
+                        {id, Id},
+                        {uuid, set_uuid(Id,Context)},
+                        {username, Username},
+                        {email, Email}
+                    ],
+                    send_email_with_mfa(Email, Vars, Context),
+                    send_mfa(Ids, Context, [Id|Acc])
+            end
+    end.
+
+
 
 %% @doc Find the preferred e-mail address of an user.
 find_email(Id, Context) ->
@@ -467,8 +486,32 @@ find_email(Id, Context) ->
 
 %% @doc Sent the reminder e-mail to the user.
 send_email(Email, Vars, Context) ->
-    z_email:send_render(Email, "email_password_reset.tpl", Vars, Context),
+    z_email:send_render(Email, "password_reset.tpl", Vars, Context),
     ok.
+
+send_email_with_mfa(Email, Vars, Context) ->
+    z_email:send_render(Email, "email_mfa.tpl", Vars, Context),
+    ok.
+
+
+%% @doc Set the unique uuid for the account.
+set_uuid(Id, Context) ->
+	Login_uuid = mod_authentication:generate_uuid(),
+    m_identity:set_by_type(Id, "logon_uuid", Login_uuid, Context),
+    Login_uuid.
+
+
+%% @doc Delete the uuid of the user
+delete_uuid(Id, Context) ->
+    m_identity:delete_by_type(Id, "logon_uuid", Context).
+    
+
+get_uuid(Login_uuid, Context) ->
+    case m_identity:lookup_by_type_and_key("logon_uuid", Login_uuid, Context) of
+        undefined -> undefined;
+        Row -> {ok, proplists:get_value(rsc_id, Row)}
+    end.
+
 
 
 %% @doc Set the unique reminder code for the account.
@@ -476,6 +519,7 @@ set_reminder_secret(Id, Context) ->
     Code = z_ids:id(),
     m_identity:set_by_type(Id, "logon_reminder_secret", Code, Context),
     Code.
+
 
 %% @doc Delete the reminder secret of the user
 delete_reminder_secret(Id, Context) ->

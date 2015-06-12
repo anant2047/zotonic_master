@@ -1,0 +1,9 @@
+{% extends "base.tpl" %}
+
+{% block html_head_extra %}
+{% lib "css/logon.css" %}
+{% endblock %}
+
+{% block title %}
+{{ m.rsc.page_logon.title|default:[_"Log on to", " ", m.config.site.title.value|default:"Zotonic"] }}
+{% endblock %}
