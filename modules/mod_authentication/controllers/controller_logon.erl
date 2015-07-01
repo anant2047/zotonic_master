@@ -114,9 +114,12 @@ provide_content(ReqData, Context) ->
     case get_by_uuid(Uuid, Context2) of
             {ok, Idx} ->
             z_transport:page(javascript, <<"alert('UUID verified, proceed to logon');">>, [{qos,1}],      Context2),
-            ContextLoggedon = logon_user(Idx, Context),
+            ContextLoggedon = logon_user(Idx, Context2),
             delete_uuid(Idx, ContextLoggedon),
-            ContextLoggedon;
+         
+	        AbsUrl = z_context:abs_url("/logon", Context2),
+    Context5 = z_context:set_resp_header("Location", AbsUrl, ContextLoggedon),
+    ?WM_REPLY({halt, 302}, Context5).
     
     undefined ->
             
