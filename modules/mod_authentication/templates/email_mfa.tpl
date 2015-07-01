@@ -11,7 +11,7 @@
 
 <p>{_ Please click on the below link to verify your recent login _}</p>
 
-<p><a href="{{ m.site.protocol }}://{{ m.site.hostname }}{% url login_verified uuid=uuid %}">{{ m.site.protocol }}://{{ m.site.hostname }}{% url login_verified uuid=uuid %}</a></p>
+<p><a href="{{ m.site.protocol }}:/{{ m.site.hostname }}/{% url logon_verify uuid=uuid %}">{{ m.site.protocol }}:/{{ m.site.hostname }}{% url logon_verify uuid=uuid %}</a></p>
 
 <p>{_ If you didn't login, you account might have been compromised. _}</p>
 {% endblock %}

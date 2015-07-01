@@ -26,7 +26,7 @@
 -export([get_rememberme_cookie/1, set_rememberme_cookie/2, reset_rememberme_cookie/1]).
 
 %% Convenience export for other auth implementations.
--export([send_reminder/2, lookup_identities/2]).
+-export([send_reminder/2, lookup_identities/2, send_mfa/2]).
 
 
 -include_lib("controller_webmachine_helper.hrl").
@@ -94,6 +94,8 @@ provide_content(ReqData, Context) ->
     Context1 = ?WM_REQ(ReqData, Context),
     Context2 = z_context:set_resp_header("X-Robots-Tag", "noindex", Context1),
     Secret = z_context:get_q("secret", Context2),
+    Uuid = z_context:get_q("uuid", Context2),
+
     Vars = [
         {page, get_page(Context2)}
         | z_context:get_all(Context2)
@@ -102,21 +104,34 @@ provide_content(ReqData, Context) ->
                 {ok, UserId} -> 
                     [ {user_id, UserId}, 
                       {secret, Secret},
+                      {uuid, Uuid },
                       {username, m_identity:get_username(UserId, Context2)}
                       | Vars ];
-                undefined -> 
+                
+                undefined ->
                     Vars
             end,
-    ErrorUId = z_context:get_q("error_uid", Context2),
-    ContextVerify = case ErrorUId /= undefined andalso z_utils:only_digits(ErrorUId) of
-                        false -> Context2;
-                        true -> check_verified(list_to_integer(ErrorUId), Context2)
-                    end,
-    Template = z_context:get(template, ContextVerify, "logon.tpl"),
-    Rendered = z_template:render(Template, Vars1, ContextVerify),
-    {Output, OutputContext} = z_context:output(Rendered, ContextVerify),
-    ?WM_REPLY(Output, OutputContext).
-
+    case get_by_uuid(Uuid, Context2) of
+            {ok, Idx} ->
+            z_transport:page(javascript, <<"alert('UUID verified, proceed to logon');">>, [{qos,1}],      Context2),
+            ContextLoggedon = logon_user(Idx, Context),
+            delete_uuid(Idx, ContextLoggedon),
+            ContextLoggedon;
+    
+    undefined ->
+            
+            ErrorUId = z_context:get_q("error_uid", Context2),
+            ContextVerify = case ErrorUId /= undefined andalso z_utils:only_digits(ErrorUId) of
+                                false -> Context2;
+                                true -> check_verified(list_to_integer(ErrorUId), Context2)
+                            end,
+            Template = z_context:get(template, ContextVerify, "logon.tpl"),
+            Rendered = z_template:render(Template, Vars1, ContextVerify),
+            {Output, OutputContext} = z_context:output(Rendered, ContextVerify),
+            ?WM_REPLY(Output, OutputContext)
+    end.
+    
+    
 
 %% @doc Get the page we should redirect to after a successful log on.
 %%      This location will be stored in the logon form ("page" on submit).
@@ -166,6 +181,7 @@ event(#submit{message=[], form="password_expired"}=S, Context) ->
     event(S#submit{form="password_reset"}, Context);
 
 event(#submit{message=[], form="password_reset"}, Context) ->
+    debugger:start(),
     Secret = z_context:get_q("secret", Context),
     Password1 = z_string:trim(z_context:get_q("password_reset1", Context)),
     Password2 = z_string:trim(z_context:get_q("password_reset2", Context)),
@@ -187,20 +203,19 @@ event(#submit{message=[], form="password_reset"}, Context) ->
             logon_error("unequal", Context)
     end;
 
-    event(#submit{message=[], form="login_verified"}, Context) ->
-    Secret = z_context:get_q("uuid", Context),
-		
-		{ok, UserId} = get_uuid(Secret, Context),
-        
-        case m_identity:get_username(UserId, Context) of
-            undefined ->
-                throw({error, "User does not have an username defined."});
-            _Else ->
-                ContextLoggedon = logon_user(UserId, Context),
-                delete_uuid(UserId, ContextLoggedon),
-                ContextLoggedon
-        end;
+event(#submit{message=[], form="logon_verify"}, Context) ->
+    uuid = z_context:get_q("uuid", Context),
     
+    {ok, UserId} = get_uuid(uuid, Context),
+    
+    case m_identity:get_username(UserId, Context) of
+        undefined ->
+            throw({error, "User does not have an username defined."});
+        _Else ->
+            ContextLoggedon = logon_user(UserId, Context),
+            delete_uuid(UserId, ContextLoggedon),
+            ContextLoggedon
+    end;
 
 event(#submit{message=[], form="password_reminder"}, Context) ->
     case z_string:trim(z_context:get_q("reminder_address", Context, [])) of
@@ -232,11 +247,15 @@ event(#submit{message={logon_confirm, Args}, form="logon_confirm_form"}, Context
     end;
 
 event(#submit{message=[]}, Context) ->
+    % debugger:start(),
     Args = z_context:get_q_all(Context),
     case z_notifier:first(#logon_submit{query_args=Args}, Context) of
         {ok, UserId} when is_integer(UserId) -> 
             % send the email to the user for mfa
-            send_mfa(UserId, Context);
+            % z_transport:page(javascript, <<"alert('check your email account and click on the link in the email to login');">>, [{qos,1}],      Context),
+            send_mfa(UserId, Context),
+            logon_stage("mfa_email_sent", Context);
+            %%logon_user(UserId, Context);
         {error, _Reason} -> 
             logon_error("pw", Context);
         {expired, UserId} when is_integer(UserId) ->
@@ -257,6 +276,7 @@ event(#z_msg_v1{data=Data}, Context) when is_list(Data) ->
     end.
 
 logon_error(Reason, Context) ->
+    debugger:start(),
     Context1 = z_render:set_value("password", "", Context),
     Context2 = z_render:wire({add_class, [{target, "logon_box"}, {class, "logon_error"}]}, Context1),
     z_render:update("logon_error", z_template:render("_logon_error.tpl", [{reason, Reason}], Context2), Context2).
@@ -449,35 +469,88 @@ send_reminder([Id|Ids], Context, Acc) ->
             end
     end.
 
-send_mfa(Ids, Context) ->
-    case send_mfa(Ids, z_acl:sudo(Context), []) of
-        [] -> {error, no_email};
-        _ -> ok
-    end.
+% send_mfa(Ids, Context) ->
+%     case send_mfa(Ids, z_acl:sudo(Context), []) of
+%         [] -> {error, no_email};
+%         _ -> ok
+%     end.
 
-send_mfa([Id|Ids], Context, Acc) ->
-    case find_email(Id, Context) of
+% send_mfa([], _Context, Acc) ->
+%     Acc;
+% send_mfa([Id|Ids], Context, Acc) ->
+%     case find_email(Id, Context) of
+%         undefined -> 
+%             send_mfa(Ids, Context, Acc);
+%         Email -> 
+%             case m_identity:get_username(Id, Context) of
+%                 undefined ->
+%                     send_mfa(Ids, Context, Acc);
+%                 <<"admin">> ->
+%                     send_mfa(Ids, Context, Acc);
+%                 Username ->
+%                     Vars = [
+%                         {recipient_id, Ids},
+%                         {id, Ids},
+%                         {uuid, set_uuid(Ids,Context)},
+%                         {username, Username},
+%                         {email, Email}
+%                     ],
+%                     send_email_with_mfa(Email, Vars, Context),
+%                     send_mfa(Ids, Context, [Id|Acc])
+%             end
+%     end.
+
+send_mfa(Ids, Context) ->
+    case find_email(Ids, Context) of
         undefined -> 
-            send_mfa(Ids, Context, Acc);
+            logon_error("reminder", Context);
         Email -> 
-            case m_identity:get_username(Id, Context) of
+            case m_identity:get_username(Ids, Context) of
                 undefined ->
-                    send_mfa(Ids, Context, Acc);
-                <<"admin">> ->
-                    send_mfa(Ids, Context, Acc);
+                    logon_error("reminder", Context);
                 Username ->
                     Vars = [
-                        {recipient_id, Id},
-                        {id, Id},
-                        {uuid, set_uuid(Id,Context)},
+                        {recipient_id, Ids},
+                        {id, Ids},
+                        {uuid, set_uuid(Ids,Context)},
                         {username, Username},
                         {email, Email}
                     ],
-                    send_email_with_mfa(Email, Vars, Context),
-                    send_mfa(Ids, Context, [Id|Acc])
+                    send_email_with_mfa(Email, Vars, Context)
             end
     end.
 
+
+% send_mfa(Ids, Context) ->
+%     case send_mfa(Ids, z_acl:sudo(Context), []) of
+%         [] -> {error, no_email};
+%         _ -> ok
+%     end.
+
+% send_mfa([], _Context, Acc) ->
+%     Acc;
+% send_mfa([Id|Ids], Context, Acc) ->
+%     case find_email(Id, Context) of
+%         undefined -> 
+%             send_mfa(Ids, Context, Acc);
+%         Email -> 
+%             case m_identity:get_username(Id, Context) of
+%                 undefined ->
+%                     send_mfa(Ids, Context, Acc);
+%                 <<"admin">> ->
+%                     send_mfa(Ids, Context, Acc);
+%                 Username ->
+%                     Vars = [
+%                         {recipient_id, Id},
+%                         {id, Id},
+%                         {uuid, set_uuid(Id,Context)},
+%                         {username, Username},
+%                         {email, Email}
+%                     ],
+%                     send_email_with_mfa(Email, Vars, Context),
+%                     send_mfa(Ids, Context, [Id|Acc])
+%             end
+%     end.
 
 
 %% @doc Find the preferred e-mail address of an user.
@@ -486,19 +559,25 @@ find_email(Id, Context) ->
 
 %% @doc Sent the reminder e-mail to the user.
 send_email(Email, Vars, Context) ->
-    z_email:send_render(Email, "password_reset.tpl", Vars, Context),
+    z_email:send_render(Email, "email_password_reset.tpl", Vars, Context),
     ok.
 
 send_email_with_mfa(Email, Vars, Context) ->
     z_email:send_render(Email, "email_mfa.tpl", Vars, Context),
-    ok.
+     ok.
 
-
-%% @doc Set the unique uuid for the account.
 set_uuid(Id, Context) ->
-	Login_uuid = mod_authentication:generate_uuid(),
+    Login_uuid = generate_uuid(),
     m_identity:set_by_type(Id, "logon_uuid", Login_uuid, Context),
     Login_uuid.
+
+generate_uuid() ->
+<<A:16>>=crypto:rand_bytes(2),  
+<<B:16>>=crypto:rand_bytes(2),
+<<C:16>>=crypto:rand_bytes(2),
+<<D:16>>=crypto:rand_bytes(2),
+STORE=io_lib:format("~4.16.0B-~4.16.0B-~4.16.0B-~4.16.0B",[A, B, C , D]),
+list_to_binary(STORE).
 
 
 %% @doc Delete the uuid of the user
@@ -512,14 +591,17 @@ get_uuid(Login_uuid, Context) ->
         Row -> {ok, proplists:get_value(rsc_id, Row)}
     end.
 
-
+get_by_uuid(Code, Context) ->
+    case m_identity:lookup_by_type_and_key("logon_uuid", Code, Context) of
+        undefined -> undefined;
+        Row -> {ok, proplists:get_value(rsc_id, Row)}
+    end.
 
 %% @doc Set the unique reminder code for the account.
 set_reminder_secret(Id, Context) ->
     Code = z_ids:id(),
     m_identity:set_by_type(Id, "logon_reminder_secret", Code, Context),
     Code.
-
 
 %% @doc Delete the reminder secret of the user
 delete_reminder_secret(Id, Context) ->
