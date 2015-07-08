@@ -30,21 +30,12 @@
     observe_logon_submit/2,
     observe_auth_autologon/2,
     observe_auth_validated/2,
-
-    observe_admin_menu/3,
-    generate_uuid/0
+    observe_admin_menu/3
 ]).
 
 -include("zotonic.hrl").
 -include_lib("modules/mod_admin/include/admin_menu.hrl").
 
-generate_uuid() ->
-<<A:16>>=crypto:rand_bytes(2),  
-<<B:16>>=crypto:rand_bytes(2),
-<<C:16>>=crypto:rand_bytes(2),
-<<D:16>>=crypto:rand_bytes(2),
-STORE=io_lib:format("~4.16.0B-~4.16.0B-~4.16.0B-~4.16.0B",[A, B, C , D]),
-io:format("~s~n",[list_to_binary(STORE)]).
 
 observe_admin_menu(admin_menu, Acc, Context) ->
     [
@@ -82,7 +73,6 @@ observe_auth_autologon(auth_autologon, Context) ->
         undefined -> undefined;
         {ok, UserId} -> {ok, UserId}
     end.
-
 
 %% @doc Handle a validation against an (external) authentication service.
 %%      If identity is known: log on the associated user and session

@@ -4,10 +4,6 @@
  {logoff, ["logoff"], controller_logoff, [{ssl, true}]},
  {logon_reminder, ["logon", "reminder"], controller_logon, [{ssl, true}]},
  {logon_reset, ["logon", "reset"], controller_logon, [{ssl, true}]},
- 
- {logon_verify, ["logon","verify"], controller_logon, [{ssl,true}]},
-
  {logon_service, ["logon", "service", service ], controller_template, [{ssl, true}, {template, "logon_service.tpl"}]},
-
  {admin_authentication_services, ["admin", "authentication-services"],  controller_admin, [{ssl,true}, {template, "admin_authentication_services.tpl"}]}
 ].
