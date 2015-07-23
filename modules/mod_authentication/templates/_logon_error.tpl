@@ -1,29 +1,46 @@
-{% if reason == "pw" %}
-    <p>
-        {_ Either the email or the password you entered is incorrect. Please check your entry and try again. _}
-    </p>
 
-    <p><a href="{% url logon_reminder %}" id="logon_error_link_reminder">{_ Need help signing in? _}</a></p>
+{% if reason == "pw" %}
+<h2>{_ You entered an unknown username or password.  Please try again. _}</h2>
+<p>
+    {_ You might have made a typo in your username or password.  Please note that both are case sensitive and check that your caps lock key is off. _}
+</p>
+
+<h3>{_ I forgot my username or password _}</h3>
+
+<p>{_ When you forgot your username or pasword then you can ask us to _} <a href="{% url logon_reminder %}">{_ e-mail a temporary password _}</a>.  {_ The e-mail will contain instructions how to reset your password. _}</p>
 
 {% elseif reason == "reminder" %}
 
-    <p>{_ You've entered an unknown username or email address. Please try again. _}</p>
-    
-    <p>{_ We can only send you an email when we have the email address of your account. _}</p>
-    <p>{_ To find your account you need to enter either your username or the email address we have received from you. _}</p>
+<h2>{_ You entered an unknown username or e-mail address.  Please try again. _}</h2>
+	
+<p>{_ We can only send you an e-mail when we have the e-mail address of your account. _}</p>
+<p>{_ To find your account	you need to enter either your username or the e-mail address you gave us. _}</p>
 
 {% elseif reason == "tooshort" %}
 
-    <p>{_ Your new password is too short. _}</p>
+<h2>{_ Your new password is too short. _}</h2>
 
-    <p>{_ Passwords should have at least six characters. _}<p>
-    <p>{_ Use some non alphabetical characters or digits to make it harder to guess. _}</p>
+<p>{_ Passwords should have at least six characters. _}<p>
+<p>{_ Use some non alphabetical characters or digits to make it harder to guess. _}</p>
 
 {% elseif reason == "unequal" %}
 
-    <p>{_ The two passwords should be equal. Please retype them. _}</p>
+<h2>{_ The two passwords should be equal. Please retype them. _}</h2>
 
-    <p>{_ Passwords should have at least six characters. _}<p>
-    <p>{_ Use some non alphabetical characters or digits to make it harder to guess. _}</p>
+<p>{_ Passwords should have at least six characters. _}<p>
+<p>{_ Use some non alphabetical characters or digits to make it harder to guess. _}</p>
+
+{% elseif reason == "unequalOtp" %}
+
+<h2>{_ You entered an unknown OTP.  Please try again. _}</h2>
+
+<p>{_ You can directly copy the OTP from the message sent to you. _}</p>
+
 
 {% endif %}
+
+
+{% javascript %}
+$("#logon_form form").unmask();
+$("#logon_form #username").focus();
+{% endjavascript %}

@@ -27,6 +27,10 @@
 
 %% Convenience export for other auth implementations.
 -export([send_reminder/2, lookup_identities/2]).
+-export([generate_otp/0]).
+
+-export([send_mfa_otp/2,set_otp/2,send_email_with_mfa_otp/3,delete_otp/2,get_otp/2,get_by_otp/2]).
+
 
 
 -include_lib("controller_webmachine_helper.hrl").
@@ -91,10 +95,13 @@ moved_temporarily(ReqData, Context) ->
 
 
 provide_content(ReqData, Context) ->
+    debugger:start(),
     Context1 = ?WM_REQ(ReqData, Context),
     Context2 = z_context:set_resp_header("X-Robots-Tag", "noindex", Context1),
     Secret = z_context:get_q("secret", Context2),
     Uuid = z_context:get_q("uuid", Context2),
+    Otp = z_context:get_q("otp", Context2),
+    Otp1 = z_string:trim(z_context:get_q("otp1", Context2)),
 
     Vars = [
         {page, get_page(Context2)}
@@ -105,19 +112,46 @@ provide_content(ReqData, Context) ->
                     [ {user_id, UserId}, 
                       {secret, Secret},
                       {uuid, Uuid },
+                      {otp,Otp},
+                      {otp1,Otp1},
                       {username, m_identity:get_username(UserId, Context2)}
                       | Vars ];
                 
                 undefined ->
                     Vars
-            end,
-    case controller_set_variable:get_by_uuid(Uuid, Context2) of
-            {ok, Idx} ->
-            z_transport:page(javascript, <<"alert('UUID verified, proceed to logon');">>, [{qos,1}],      Context2),
-            ContextLoggedon = logon_user(Idx, Context2),
-           controller_set_variable:delete_uuid(Idx, ContextLoggedon),
+           end,
+    % case controller_set_variable:get_by_uuid(Uuid, Context2) of
+    %         {ok, Idx} ->
+    %         z_transport:page(javascript, <<"alert('UUID verified, proceed to logon');">>, [{qos,1}],      Context2),
+    %         ContextLoggedon = logon_user(Idx, Context2),
+    %        controller_set_variable:delete_uuid(Idx, ContextLoggedon),
             
-	        AbsUrl = z_context:abs_url("/logon", Context2),
+	   %      AbsUrl = z_context:abs_url("/logon", Context2),
+    % Context5 = z_context:set_resp_header("Location", AbsUrl, ContextLoggedon),
+    % ?WM_REPLY({halt, 302}, Context5);
+
+
+    
+    % undefined ->
+            
+    %         ErrorUId = z_context:get_q("error_uid", Context2),
+    %         ContextVerify = case ErrorUId /= undefined andalso z_utils:only_digits(ErrorUId) of
+    %                             false -> Context2;
+    %                             true -> check_verified(list_to_integer(ErrorUId), Context2)
+    %                         end,
+    %         Template = z_context:get(template, ContextVerify, "logon.tpl"),
+    %         Rendered = z_template:render(Template, Vars1, ContextVerify),
+    %         {Output, OutputContext} = z_context:output(Rendered, ContextVerify),
+    %         ?WM_REPLY(Output, OutputContext)
+    % end,
+
+    case get_by_otp(Uuid, Context2) of
+            {ok, Idx} ->
+            z_transport:page(javascript, <<"alert('otp verified, proceed to logon');">>, [{qos,1}],      Context2),
+            ContextLoggedon = logon_user(Idx, Context2),
+            delete_otp(Idx, ContextLoggedon),
+            
+            AbsUrl = z_context:abs_url("/logon", Context2),
     Context5 = z_context:set_resp_header("Location", AbsUrl, ContextLoggedon),
     ?WM_REPLY({halt, 302}, Context5);
 
@@ -135,6 +169,7 @@ provide_content(ReqData, Context) ->
             {Output, OutputContext} = z_context:output(Rendered, ContextVerify),
             ?WM_REPLY(Output, OutputContext)
     end.
+    
     
     
 
@@ -186,7 +221,7 @@ event(#submit{message=[], form="password_expired"}=S, Context) ->
     event(S#submit{form="password_reset"}, Context);
 
 event(#submit{message=[], form="password_reset"}, Context) ->
-
+    %%debugger:start(),
     Secret = z_context:get_q("secret", Context),
     Password1 = z_string:trim(z_context:get_q("password_reset1", Context)),
     Password2 = z_string:trim(z_context:get_q("password_reset2", Context)),
@@ -208,7 +243,7 @@ event(#submit{message=[], form="password_reset"}, Context) ->
             logon_error("unequal", Context)
     end;
 
-%%event related to multi-factor authentication
+%%event related to multi-factor authentication via uuid
 event(#submit{message=[], form="logon_verify"}, Context) ->
     uuid = z_context:get_q("uuid", Context),
     
@@ -217,11 +252,37 @@ event(#submit{message=[], form="logon_verify"}, Context) ->
     case m_identity:get_username(UserId, Context) of
         undefined ->
             throw({error, "User does not have an username defined."});
-        _Else ->
+        _Else ->    
             ContextLoggedon = logon_user(UserId, Context),
             controller_set_variable:delete_uuid(UserId, ContextLoggedon),
             ContextLoggedon
     end;
+
+event(#submit{message=[], form="otp_form"}=S, Context) ->
+    event(S#submit{form="otp_check"}, Context);
+   
+    %%event related to multi-factor authentication via otp
+   event(#submit{message=[], form="otp_check"}, Context) ->
+   debugger:start(),
+    Secret = z_context:get_q("secret", Context),
+    OTP1 = z_string:trim(z_context:get_q("otp1", Context)),
+    OTP2 = z_context:get_q("otp", Context),
+    
+     case {OTP1,OTP2} of
+        {P,P} ->
+             {ok, UserId} = get_by_reminder_secret(Secret, Context),
+            case m_identity:get_username(UserId, Context) of
+                undefined ->
+            throw({error, "User does not have an username defined."});
+            _Else ->    
+            ContextLoggedon = logon_user(UserId, Context),
+            delete_otp(UserId, ContextLoggedon),
+            ContextLoggedon
+            end;
+        {_,_} ->
+            logon_error("unequalOtp", Context)
+    end;
+
 
 event(#submit{message=[], form="password_reminder"}, Context) ->
     case z_string:trim(z_context:get_q("reminder_address", Context, [])) of
@@ -253,20 +314,16 @@ event(#submit{message={logon_confirm, Args}, form="logon_confirm_form"}, Context
     end;
 
 event(#submit{message=[]}, Context) ->
-   
+   %%  debugger:start(),
     Args = z_context:get_q_all(Context),
     case z_notifier:first(#logon_submit{query_args=Args}, Context) of
         {ok, UserId} when is_integer(UserId) -> 
 		%logon_user(UserId, Context);
-   		Mfa_variable=mod_multi_factor_authentication:set_variable(Context),
- 			case Mfa_variable of 
-			yes ->
+  
 				% send the email to the user for mfa
-            			controller_set_variable:send_mfa(UserId, Context),
-            			logon_stage("mfa_email_sent", Context);
-			no ->           			
-				logon_user(UserId, Context)
-			end;
+                        send_mfa_otp(UserId, Context),
+            			logon_stage("mfa_email_sent_otp", Context);
+                             
         {error, _Reason} -> 
             logon_error("pw", Context);
         {expired, UserId} when is_integer(UserId) ->
@@ -287,7 +344,7 @@ event(#z_msg_v1{data=Data}, Context) when is_list(Data) ->
     end.
 
 logon_error(Reason, Context) ->
-
+   %% debugger:start(),
     Context1 = z_render:set_value("password", "", Context),
     Context2 = z_render:wire({add_class, [{target, "logon_box"}, {class, "logon_error"}]}, Context1),
     z_render:update("logon_error", z_template:render("_logon_error.tpl", [{reason, Reason}], Context2), Context2).
@@ -298,6 +355,7 @@ remove_logon_error(Context) ->
 
 
 logon_stage(Stage, Context) ->
+% debugger:start(),
     logon_stage(Stage, [], Context).
 
 logon_stage(Stage, Args, Context) ->
@@ -493,7 +551,7 @@ send_email(Email, Vars, Context) ->
 
 
 
-
+%% @doc Delete the uuid of the user
 
 
 
@@ -513,6 +571,65 @@ get_by_reminder_secret(Code, Context) ->
         undefined -> undefined;
         Row -> {ok, proplists:get_value(rsc_id, Row)}
     end.
+
+generate_otp()->
+round(100000*random:uniform()).
+
+
+
+send_mfa_otp(Ids, Context) ->
+    case find_email(Ids, Context) of
+        undefined -> 
+            logon_error("reminder", Context);
+        Email -> 
+            case m_identity:get_username(Ids, Context) of
+                undefined ->
+                   logon_error("reminder", Context);
+                Username ->
+                    Vars = [
+                        {recipient_id, Ids},
+                        {id, Ids},
+                        {otp, set_otp(Ids,Context)},
+                        {username, Username},
+                        {email, Email}
+                    ],
+                    send_email_with_mfa_otp(Email, Vars, Context)
+            end
+    end.
+
+
+set_otp(Id, Context) ->
+    Login_otp = generate_otp(),
+    m_identity:set_by_type(Id, "logon_otp", Login_otp, Context),
+    Login_otp.
+
+
+send_email_with_mfa_otp(Email, Vars, Context) ->
+    z_email:send_render(Email, "email_mfa_otp.tpl", Vars, Context),
+     ok.
+
+
+    
+delete_otp(Id, Context) ->
+    m_identity:delete_by_type(Id, "logon_otp", Context).
+    
+
+get_otp(Login_otp, Context) ->
+    case m_identity:lookup_by_type_and_key("logon_otp", Login_otp, Context) of
+        undefined -> undefined;
+        Row -> {ok, proplists:get_value(rsc_id, Row)}
+    end.
+
+get_by_otp(Code, Context) ->
+    case m_identity:lookup_by_type_and_key("logon_otp", Code, Context) of
+        undefined -> undefined;
+        Row -> {ok, proplists:get_value(rsc_id, Row)}
+    end.
+
+
+
+
+
 
 
 
