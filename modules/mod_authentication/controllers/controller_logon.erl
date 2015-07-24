@@ -23,11 +23,11 @@
 -export([resource_exists/2, previously_existed/2, moved_temporarily/2]).
 -export([provide_content/2]).
 -export([event/2]).
--export([get_rememberme_cookie/1, set_rememberme_cookie/2, reset_rememberme_cookie/1]).
+-export([get_rememberme_cookie/1, set_rememberme_cookie/2, reset_rememberme_cookie/1,get_by_reminder_secret/2]).
 
 %% Convenience export for other auth implementations.
 -export([send_reminder/2, lookup_identities/2]).
--export([generate_otp/0]).
+-export([generate_otp/0,logon_user/2,logon_error/2]).
 
 -export([send_mfa_otp/2,set_otp/2,send_email_with_mfa_otp/3,delete_otp/2,get_otp/2,get_by_otp/2]).
 
@@ -100,8 +100,9 @@ provide_content(ReqData, Context) ->
     Context2 = z_context:set_resp_header("X-Robots-Tag", "noindex", Context1),
     Secret = z_context:get_q("secret", Context2),
     Uuid = z_context:get_q("uuid", Context2),
+
     Otp = z_context:get_q("otp", Context2),
-    Otp1 = z_string:trim(z_context:get_q("otp1", Context2)),
+    Otp1 = z_context:get_q("otp1", Context2),
 
     Vars = [
         {page, get_page(Context2)}
@@ -258,28 +259,35 @@ event(#submit{message=[], form="logon_verify"}, Context) ->
             ContextLoggedon
     end;
 
-event(#submit{message=[], form="otp_form"}=S, Context) ->
-    event(S#submit{form="otp_check"}, Context);
-   
-    %%event related to multi-factor authentication via otp
-   event(#submit{message=[], form="otp_check"}, Context) ->
-   debugger:start(),
-    Secret = z_context:get_q("secret", Context),
-    OTP1 = z_string:trim(z_context:get_q("otp1", Context)),
-    OTP2 = z_context:get_q("otp", Context),
+
+   event({submit, otp_form_verified, _FormId, _TagerId}, Context) ->
+   % ?DEBUG(z_context:get_q_all(Context)),
+   UserId1=z_context:get_q("UserId", Context),
+   % ?DEBUG(UserId1),
+   {UserId,_}=string:to_integer(UserId1),
+   % ?DEBUG(UserId),
+    % Secret = z_context:get_q("secret", Context),
+
+    OTP1 = erlang:list_to_binary(z_string:trim(z_context:get_q("otp1", Context))),
+    OTP2 = get_otp( UserId,Context),
     
      case {OTP1,OTP2} of
         {P,P} ->
-             {ok, UserId} = get_by_reminder_secret(Secret, Context),
+             % {ok, UserId} = get_by_reminder_secret(Secret, Context),
             case m_identity:get_username(UserId, Context) of
                 undefined ->
             throw({error, "User does not have an username defined."});
             _Else ->    
             ContextLoggedon = logon_user(UserId, Context),
             delete_otp(UserId, ContextLoggedon),
+            
             ContextLoggedon
+
             end;
         {_,_} ->
+        ?DEBUG(OTP1),
+        ?DEBUG(OTP2),
+
             logon_error("unequalOtp", Context)
     end;
 
@@ -314,15 +322,15 @@ event(#submit{message={logon_confirm, Args}, form="logon_confirm_form"}, Context
     end;
 
 event(#submit{message=[]}, Context) ->
-   %%  debugger:start(),
+     % debugger:start(),
     Args = z_context:get_q_all(Context),
     case z_notifier:first(#logon_submit{query_args=Args}, Context) of
         {ok, UserId} when is_integer(UserId) -> 
-		%logon_user(UserId, Context);
+		% logon_user(UserId, Context);
   
 				% send the email to the user for mfa
-                        send_mfa_otp(UserId, Context),
-            			logon_stage("mfa_email_sent_otp", Context);
+                       send_mfa_otp(UserId, Context),
+                        z_render:wire({redirect, [{location, "/logon/otp-form?UserId=" ++ erlang:integer_to_list(UserId) }]}, Context);
                              
         {error, _Reason} -> 
             logon_error("pw", Context);
@@ -615,9 +623,11 @@ delete_otp(Id, Context) ->
     
 
 get_otp(Login_otp, Context) ->
-    case m_identity:lookup_by_type_and_key("logon_otp", Login_otp, Context) of
+    case m_identity:get_rsc_by_type( Login_otp,"logon_otp", Context) of
         undefined -> undefined;
-        Row -> {ok, proplists:get_value(rsc_id, Row)}
+         [Row | _] ->  proplists:get_value(key, Row)
+        
+        % X -> ?DEBUG(X)
     end.
 
 get_by_otp(Code, Context) ->

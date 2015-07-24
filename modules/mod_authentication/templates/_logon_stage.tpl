@@ -31,46 +31,6 @@
 
 </div>
 
-{% elseif stage == "mfa_email_sent_otp" %}
-<div class="logon_message">
-    <form id="otp_form" method="post" action="postback">
-
-    <h1 class="logon_header">{_ OTP has been sent to you _}</h1>
-
- 
-
-        <input type="hidden" id="otp_form1" name="secret" value="{{ secret|escape }}" />
-
-        <div class="form-group">
-        <label class="control-label" for="otp1">{_ Below you can enter OTP _}</label>
-            <div>
-            <input type="password" id="otp1" class="col-lg-4 col-md-4 form-control" name="otp1" value="" autocomplete="off" />
-            </div>
-        </div>
-        <div class="form-group buttons">
-            <div>
-            <button class="btn btn-primary btn-lg" type="submit">{_ Submit OTP_}</button>
-            </div>
-        </div>
-
-
-    <div id="logon_form">
-
-    <p>{_ When you don’t receive the e-mail within a few minutes then be sure to check your spam filter and spam folders. _}</p>
-
-    {% if not m.acl.user %}
-        <p><a class="btn btn-default" href="{% url logon %}">{_ Back to logon form _}</a></p>
-    {% else %}
-        <p><a id="{{ #cancel }}" class="btn btn-default" href="#">{_ Cancel _}</a></p>
-        {% wire id=#cancel action={redirect back} %}
-    {% endif %}
-
-
-
- {% javascript %}setTimeout(function(){$("#otp1").focus(); z_init_postback_forms();}, 100);{% endjavascript %}
-</form>
-</div>
-
 {% elseif stage == "verification_pending" %}
 <div class="logon_message">
 
