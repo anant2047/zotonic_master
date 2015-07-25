@@ -95,7 +95,7 @@ moved_temporarily(ReqData, Context) ->
 
 
 provide_content(ReqData, Context) ->
-    debugger:start(),
+    % debugger:start(),
     Context1 = ?WM_REQ(ReqData, Context),
     Context2 = z_context:set_resp_header("X-Robots-Tag", "noindex", Context1),
     Secret = z_context:get_q("secret", Context2),
@@ -222,7 +222,7 @@ event(#submit{message=[], form="password_expired"}=S, Context) ->
     event(S#submit{form="password_reset"}, Context);
 
 event(#submit{message=[], form="password_reset"}, Context) ->
-    %%debugger:start(),
+   
     Secret = z_context:get_q("secret", Context),
     Password1 = z_string:trim(z_context:get_q("password_reset1", Context)),
     Password2 = z_string:trim(z_context:get_q("password_reset2", Context)),
@@ -261,23 +261,22 @@ event(#submit{message=[], form="logon_verify"}, Context) ->
 
 
    event({submit, otp_form_verified, _FormId, _TagerId}, Context) ->
-   % ?DEBUG(z_context:get_q_all(Context)),
+   
    UserId1=z_context:get_q("UserId", Context),
    % ?DEBUG(UserId1),
    {UserId,_}=string:to_integer(UserId1),
    % ?DEBUG(UserId),
-    % Secret = z_context:get_q("secret", Context),
-
     OTP1 = erlang:list_to_binary(z_string:trim(z_context:get_q("otp1", Context))),
     OTP2 = get_otp( UserId,Context),
     
      case {OTP1,OTP2} of
         {P,P} ->
-             % {ok, UserId} = get_by_reminder_secret(Secret, Context),
+            
             case m_identity:get_username(UserId, Context) of
                 undefined ->
             throw({error, "User does not have an username defined."});
             _Else ->    
+           
             ContextLoggedon = logon_user(UserId, Context),
             delete_otp(UserId, ContextLoggedon),
             
@@ -285,10 +284,9 @@ event(#submit{message=[], form="logon_verify"}, Context) ->
 
             end;
         {_,_} ->
-        ?DEBUG(OTP1),
-        ?DEBUG(OTP2),
-
-            logon_error("unequalOtp", Context)
+        
+         z_render:wire({redirect, [{location, "/logon/otp-form/error"  }]}, Context)
+            
     end;
 
 
@@ -326,11 +324,13 @@ event(#submit{message=[]}, Context) ->
     Args = z_context:get_q_all(Context),
     case z_notifier:first(#logon_submit{query_args=Args}, Context) of
         {ok, UserId} when is_integer(UserId) -> 
-		% logon_user(UserId, Context);
-  
+		
 				% send the email to the user for mfa
                        send_mfa_otp(UserId, Context),
+                       
                         z_render:wire({redirect, [{location, "/logon/otp-form?UserId=" ++ erlang:integer_to_list(UserId) }]}, Context);
+
+                        
                              
         {error, _Reason} -> 
             logon_error("pw", Context);
@@ -372,6 +372,8 @@ logon_stage(Stage, Args, Context) ->
     
 
 logon_user(UserId, Context) ->
+?DEBUG(UserId),
+debugger:start(),
     case z_auth:logon(UserId, Context) of
         {ok, ContextUser} ->
             ContextRemember = case z_context:get_q("rememberme", ContextUser, []) of
@@ -559,10 +561,6 @@ send_email(Email, Vars, Context) ->
 
 
 
-%% @doc Delete the uuid of the user
-
-
-
 %% @doc Set the unique reminder code for the account.
 set_reminder_secret(Id, Context) ->
     Code = z_ids:id(),
@@ -607,8 +605,9 @@ send_mfa_otp(Ids, Context) ->
 
 
 set_otp(Id, Context) ->
+    
     Login_otp = generate_otp(),
-    m_identity:set_by_type(Id, "logon_otp", Login_otp, Context),
+    m_identity:set_by_type(Id, "logon_otp_value", Login_otp, Context),
     Login_otp.
 
 
@@ -619,23 +618,25 @@ send_email_with_mfa_otp(Email, Vars, Context) ->
 
     
 delete_otp(Id, Context) ->
-    m_identity:delete_by_type(Id, "logon_otp", Context).
+   
+    Key=erlang:binary_to_integer(get_otp( Id,Context)),
+
+    % m_identity:delete_by_type(Id, "logon_otp_value", Context).
+    m_identity:delete_by_type_and_key(Id, "logon_otp_value", Key, Context) .
     
 
 get_otp(Login_otp, Context) ->
-    case m_identity:get_rsc_by_type( Login_otp,"logon_otp", Context) of
+    case m_identity:get_rsc_by_type( Login_otp,"logon_otp_value", Context) of
         undefined -> undefined;
          [Row | _] ->  proplists:get_value(key, Row)
         
-        % X -> ?DEBUG(X)
     end.
 
 get_by_otp(Code, Context) ->
-    case m_identity:lookup_by_type_and_key("logon_otp", Code, Context) of
+    case m_identity:lookup_by_type_and_key("logon_otp_value", Code, Context) of
         undefined -> undefined;
         Row -> {ok, proplists:get_value(rsc_id, Row)}
     end.
-
 
 
 

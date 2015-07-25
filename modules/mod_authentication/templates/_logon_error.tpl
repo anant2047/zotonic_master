@@ -30,13 +30,6 @@
 <p>{_ Passwords should have at least six characters. _}<p>
 <p>{_ Use some non alphabetical characters or digits to make it harder to guess. _}</p>
 
-{% elseif reason == "unequalOtp" %}
-
-<h2>{_ You entered an unknown OTP.  Please try again. _}</h2>
-
-<p>{_ You can directly copy the OTP from the message sent to you. _}</p>
-
-
 {% endif %}
 
 
