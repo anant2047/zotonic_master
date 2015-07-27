@@ -579,7 +579,16 @@ get_by_reminder_secret(Code, Context) ->
     end.
 
 generate_otp()->
-round(100000*random:uniform()).
+generate_otp1(erlang:binary_to_list(crypto:rand_bytes(4))).
+
+generate_otp1([])->1;
+
+generate_otp1([Value|Tail])->
+case Value of
+0->generate_otp1(Tail);
+_Else->Value*generate_otp1(Tail)
+end.
+
 
 
 
