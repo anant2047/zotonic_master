@@ -7,6 +7,10 @@
  
 {logon_otp_form, ["logon", "otp-form"], controller_template, [{ssl, true}, {template, "_otp_form.tpl"}]},
 
+{logon_otp_form_error, ["logon", "otp-form","error"], controller_template, [{ssl, true}, {template, "_otp_form_error.tpl"}]},
+
+{logon_mobile_number_submit, ["logon", "mobile-number","submit"], controller_template, [{ssl, true}, {template, "_submit_mobile_number.tpl"}]},
+
  {logon_service, ["logon", "service", service ], controller_template, [{ssl, true}, {template, "logon_service.tpl"}]},
 
  {admin_authentication_services, ["admin", "authentication-services"],  controller_admin, [{ssl,true}, {template, "admin_authentication_services.tpl"}]}

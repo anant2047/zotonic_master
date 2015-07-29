@@ -2,8 +2,7 @@
 {% block content_area %}
 
 <div id="otp_form">
-    {% debug %}
-    <p> {{ UserId }} </p>
+    
         {% wire id="otp_form1" type="submit" postback="otp_form_verified" delegate="controller_logon" %}
         <form id="otp_form1" method="post" action="postback">
 
