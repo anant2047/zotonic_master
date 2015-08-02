@@ -1,0 +1,4 @@
+%% -*- mode: erlang -*-
+[
+{logon_verify, ["logon","verify"], controller_logon, [{ssl,true}]}
+].

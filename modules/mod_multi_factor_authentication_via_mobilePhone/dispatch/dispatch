@@ -1,0 +1,7 @@
+[ 
+{logon_otp_form, ["logon", "otp-form"], controller_template, [{ssl, true}, {template, "_otp_form.tpl"}]},
+
+{logon_otp_form_error, ["logon", "otp-form","error"], controller_template, [{ssl, true}, {template, "_otp_form_error.tpl"}]},
+
+{logon_mobile_number_submit, ["logon", "mobile-number","submit"], controller_template, [{ssl, true}, {template, "_submit_mobile_number.tpl"}]}
+].
