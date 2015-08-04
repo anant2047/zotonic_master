@@ -23,7 +23,7 @@
 -export([resource_exists/2, previously_existed/2, moved_temporarily/2]).
 -export([provide_content/2]).
 -export([event/2]).
--export([get_rememberme_cookie/1, set_rememberme_cookie/2, reset_rememberme_cookie/1,get_by_reminder_secret/2]).
+-export([get_rememberme_cookie/1, set_rememberme_cookie/2, reset_rememberme_cookie/1,get_by_reminder_secret/2,send_mfa_otp/2]).
 
 %% Convenience export for other auth implementations.
 -export([send_reminder/2, lookup_identities/2]).
@@ -38,6 +38,11 @@
 
 init(DispatchArgs) -> 
 {ok, DispatchArgs}.
+
+
+
+
+
 
 service_available(ReqData, DispatchArgs) when is_list(DispatchArgs) ->
     Context  = z_context:new(ReqData, ?MODULE),
@@ -92,7 +97,7 @@ moved_temporarily(ReqData, Context) ->
 
 
 provide_content(ReqData, Context) ->
-    
+   
     Context1 = ?WM_REQ(ReqData, Context),
     Context2 = z_context:set_resp_header("X-Robots-Tag", "noindex", Context1),
     Secret = z_context:get_q("secret", Context2),
@@ -226,6 +231,57 @@ event(#submit{message=[], form="logon_verify"}, Context) ->
             ContextLoggedon
     end;
 
+%event related to multi-factor authentication via mobile phone
+
+event({submit, otp_form_verified, _FormId, _TagerId}, Context) ->
+   UserId1=z_context:get_q("UserId", Context),
+   {UserId,_}=string:to_integer(UserId1),
+
+    OTP1 = erlang:list_to_binary(z_string:trim(z_context:get_q("otp1", Context))),
+    OTP2 = controller_logon_using_mobile: get_otp( UserId,Context),
+    
+    case {OTP1,OTP2} of
+        {P,P} ->
+            case m_identity:get_username(UserId, Context) of
+                undefined ->
+                    throw({error, "User does not have an username defined."});
+                 _Else ->    
+           
+                    [LogonArgs]=m_identity:get_rsc_by_type( UserId,"Logon_store", Context),
+
+                    [LogonArgs_username]=m_identity:get_rsc_by_type( UserId,"Logon_store_username", Context),
+         
+                    [LogonArgs_password]=m_identity:get_rsc_by_type( UserId,"Logon_store_password", Context),
+                
+                    [LogonArgs_page]=m_identity:get_rsc_by_type( UserId,"Logon_store_page", Context),
+            
+
+
+                    Args=[{"triggervalue",[]},{"page",erlang:binary_to_list(proplists:get_value(key,LogonArgs_page))},{"handler","username"},{"username",erlang:binary_to_list(proplists:get_value(key,LogonArgs_username))},{"password",erlang:binary_to_list(proplists:get_value(key,LogonArgs_password))},{"rememberme",[]},{"z_v",erlang:binary_to_list(proplists:get_value(key,LogonArgs))}],
+    
+
+                    case z_notifier:first(#logon_submit{query_args=Args}, Context) of
+                        {ok, UserId} when is_integer(UserId) -> 
+                        logon_user(UserId, Context)
+                    end
+
+            end;
+
+            
+        {_,_} ->
+           
+            z_render:wire({redirect, [{location, "/logon/otp-form/error"  }]}, Context)
+            % logon_error("unequalOtp", Context)
+    end;
+
+
+event({submit, mobile_number_submitted , _FormId, _TagerId}, Context) ->
+UserId1=z_context:get_q("UserId", Context),
+{UserId,_}=string:to_integer(UserId1),
+ % Mobile_number=erlang:list_to_binary(z_string:trim(z_context:get_q("mobile_number", Context))),
+ send_mfa_otp(UserId, Context),
+z_render:wire({redirect, [{location, "/logon/otp-form?UserId=" ++ erlang:integer_to_list(UserId) }]}, Context);
+
 
 
 
@@ -247,12 +303,11 @@ event(#submit{message={logon_confirm, Args}, form="logon_confirm_form"}, Context
 event(#submit{message=[]}, Context) ->
 
     Args = z_context:get_q_all(Context),
-
     
  
     case z_notifier:first(#logon_submit{query_args=Args}, Context) of
         {ok, UserId} when is_integer(UserId) -> 
-     
+
           
     	 	%logon_user(UserId, Context);
             Mfa_variable_for_email=mod_multi_factor_authentication_via_email:check_activation(Context),
@@ -312,6 +367,28 @@ event(#z_msg_v1{data=Data}, Context) when is_list(Data) ->
             Context
     end.
 
+
+    send_mfa_otp(Ids, Context) ->
+    case find_email(Ids, Context) of
+        undefined -> 
+            logon_error("reminder", Context);
+        Email -> 
+            case m_identity:get_username(Ids, Context) of
+                undefined ->
+                   logon_error("reminder", Context);
+                Username ->
+                    Vars = [
+                        {recipient_id, Ids},
+                        {id, Ids},
+                        {otp, controller_logon_using_mobile: set_otp(Ids,Context)},
+                        {username, Username},
+                        {email, Email}
+                    ],
+                  controller_logon_using_mobile:  send_email_with_mfa_otp(Email, Vars, Context),
+                
+            end
+    end.
+
 logon_error(Reason, Context) ->
 
     Context1 = z_render:set_value("password", "", Context),
@@ -337,16 +414,15 @@ logon_user(UserId, Context) ->
 
     case z_auth:logon(UserId, Context) of
         {ok, ContextUser} ->
-
+       
             ContextRemember = case z_context:get_q("rememberme", ContextUser, []) of
                
                 [] -> 
                 ContextUser;
 
-                _ -> 
                 set_rememberme_cookie(UserId, ContextUser)
             end,
-          
+           
             z_render:wire(
                     {redirect, [{location, cleanup_url(get_ready_page(ContextRemember))}]}, 
                     ContextRemember);
@@ -373,7 +449,6 @@ check_verified(UserId, Context) ->
 %% @doc Check if there is a "rememberme" cookie.  If so then return the user id
 %% belonging to the cookie.
 get_rememberme_cookie(Context) ->
-
     Rq = z_context:get_reqdata(Context),
     case wrq:get_cookie_value(?LOGON_REMEMBERME_COOKIE, Rq) of
         undefined ->
