@@ -3,5 +3,5 @@
 
 {logon_otp_form_error, ["logon", "otp-form","error"], controller_template, [{ssl, true}, {template, "_otp_form_error.tpl"}]},
 
-{logon_mobile_number_submit, ["logon", "mobile-number","submit"], controller_template, [{ssl, true}, {template, "_submit_mobile_number.tpl"}]}
+{logon_mobile_number_not_found, ["logon", "mobile-number","notfound"], controller_template, [{ssl, true}, {template, "_mobile_number_not_found.tpl"}]},
 ].

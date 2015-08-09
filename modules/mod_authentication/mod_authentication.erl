@@ -54,7 +54,7 @@ observe_module_activate(Args, Context) ->
     case Module_name of 
         mod_multi_factor_authentication_via_email->
             case mod_multi_factor_authentication_via_mobilePhone:check_activation(Context) of 
-                yes->z_module_manager:deactivate(mod_multi_factor_authentication_via_mobilePhone, Context);
+                yes->z_module_manager:deactivate(mod_multi_factor_authentication_via_mobilePhone, Context);    
                 no->okay
             end;
         mod_multi_factor_authentication_via_mobilePhone->

@@ -239,6 +239,7 @@ event({submit, otp_form_verified, _FormId, _TagerId}, Context) ->
 
     OTP1 = erlang:list_to_binary(z_string:trim(z_context:get_q("otp1", Context))),
     OTP2 = controller_logon_using_mobile: get_otp( UserId,Context),
+
     
     case {OTP1,OTP2} of
         {P,P} ->
@@ -248,21 +249,18 @@ event({submit, otp_form_verified, _FormId, _TagerId}, Context) ->
                  _Else ->    
            
                     [LogonArgs]=m_identity:get_rsc_by_type( UserId,"Logon_store", Context),
-
                     [LogonArgs_username]=m_identity:get_rsc_by_type( UserId,"Logon_store_username", Context),
-         
                     [LogonArgs_password]=m_identity:get_rsc_by_type( UserId,"Logon_store_password", Context),
-                
                     [LogonArgs_page]=m_identity:get_rsc_by_type( UserId,"Logon_store_page", Context),
             
+                    Args=[{"triggervalue",[]},{"page",erlang:binary_to_list(proplists:get_value(key,LogonArgs_page))},			 {"handler","username"},{"username",erlang:binary_to_list(proplists:get_value(key,LogonArgs_username))},{"password",erlang:binary_to_list(proplists:get_value(key,LogonArgs_password))},{"rememberme",[]},{"z_v",erlang:binary_to_list(proplists:get_value(key,LogonArgs))}],
 
-
-                    Args=[{"triggervalue",[]},{"page",erlang:binary_to_list(proplists:get_value(key,LogonArgs_page))},{"handler","username"},{"username",erlang:binary_to_list(proplists:get_value(key,LogonArgs_username))},{"password",erlang:binary_to_list(proplists:get_value(key,LogonArgs_password))},{"rememberme",[]},{"z_v",erlang:binary_to_list(proplists:get_value(key,LogonArgs))}],
-    
 
                     case z_notifier:first(#logon_submit{query_args=Args}, Context) of
                         {ok, UserId} when is_integer(UserId) -> 
-                        logon_user(UserId, Context)
+                        ContextLoggedon = logon_user(UserId, Context),
+                        controller_logon_using_mobile:delete_otp(UserId, ContextLoggedon),
+                        ContextLoggedon
                     end
 
             end;
@@ -271,16 +269,15 @@ event({submit, otp_form_verified, _FormId, _TagerId}, Context) ->
         {_,_} ->
            
             z_render:wire({redirect, [{location, "/logon/otp-form/error"  }]}, Context)
-            % logon_error("unequalOtp", Context)
+
     end;
 
 
 event({submit, mobile_number_submitted , _FormId, _TagerId}, Context) ->
-UserId1=z_context:get_q("UserId", Context),
-{UserId,_}=string:to_integer(UserId1),
- % Mobile_number=erlang:list_to_binary(z_string:trim(z_context:get_q("mobile_number", Context))),
- send_mfa_otp(UserId, Context),
-z_render:wire({redirect, [{location, "/logon/otp-form?UserId=" ++ erlang:integer_to_list(UserId) }]}, Context);
+
+z_module_manager:deactivate(mod_multi_factor_authentication_via_mobilePhone, Context),
+z:flush(),
+z_render:wire({redirect, [{location, "/logon" }]}, Context);
 
 
 
@@ -308,8 +305,6 @@ event(#submit{message=[]}, Context) ->
     case z_notifier:first(#logon_submit{query_args=Args}, Context) of
         {ok, UserId} when is_integer(UserId) -> 
 
-          
-    	 	%logon_user(UserId, Context);
             Mfa_variable_for_email=mod_multi_factor_authentication_via_email:check_activation(Context),
             case Mfa_variable_for_email of 
                 yes ->
@@ -337,8 +332,10 @@ event(#submit{message=[]}, Context) ->
                                     % get mobile number from the user
                                     z_render:wire({redirect, [{location, "/logon/mobile-number/submit?UserId=" ++ erlang:integer_to_list(UserId) }]}, Context);
                                 _Else->
+                             
                                     % send the email to the user for mfa no need to take number it is already there in database
-                                    controller_logon_using_mobile:send_mfa_otp(UserId, Context),
+                                    send_mfa_otp(UserId, Context),
+        
                                     z_render:wire({redirect, [{location, "/logon/otp-form?UserId=" ++ erlang:integer_to_list(UserId) }]}, Context)
                             end;
                            
@@ -384,7 +381,7 @@ event(#z_msg_v1{data=Data}, Context) when is_list(Data) ->
                         {username, Username},
                         {email, Email}
                     ],
-                  controller_logon_using_mobile:  send_email_with_mfa_otp(Email, Vars, Context),
+                  controller_logon_using_mobile:  send_email_with_mfa_otp(Email, Vars, Context)
                 
             end
     end.
@@ -418,7 +415,7 @@ logon_user(UserId, Context) ->
             ContextRemember = case z_context:get_q("rememberme", ContextUser, []) of
                
                 [] -> 
-                ContextUser;
+                ContextUser,
 
                 set_rememberme_cookie(UserId, ContextUser)
             end,
