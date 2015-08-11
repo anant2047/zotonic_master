@@ -1,18 +1,19 @@
 -module(controller_logon_using_mobile).
 
--export([generate_otp/0,generate_otp1/1,send_mfa_otp/2,set_otp/2,send_email_with_mfa_otp/3,delete_otp/2,get_otp/2,get_by_otp/2]).
+-export([generate_otp/0,generate_otp1/1,set_otp/2,send_email_with_mfa_otp/3,delete_otp/2,get_otp/2,get_by_otp/2]).
 -export([event/2]).
-
 -include_lib("controller_webmachine_helper.hrl").
 -include_lib("include/zotonic.hrl").
+
+-define(LOGON_REMEMBERME_COOKIE, "z_logon").
+-define(LOGON_REMEMBERME_DAYS, 365).
 
 event({submit, otp_form_verified, _FormId, _TagerId}, Context) ->
    UserId1=z_context:get_q("UserId", Context),
    {UserId,_}=string:to_integer(UserId1),
-
     OTP1 = erlang:list_to_binary(z_string:trim(z_context:get_q("otp1", Context))),
-    OTP2 = get_otp( UserId,Context),
-    
+    OTP2 = controller_logon_using_mobile: get_otp( UserId,Context),
+
     case {OTP1,OTP2} of
         {P,P} ->
             case m_identity:get_username(UserId, Context) of
@@ -20,45 +21,15 @@ event({submit, otp_form_verified, _FormId, _TagerId}, Context) ->
                     throw({error, "User does not have an username defined."});
                  _Else ->    
            
-                    [LogonArgs]=m_identity:get_rsc_by_type( UserId,"Logon_store", Context),
-                    ?DEBUG(LogonArgs),
-                    [LogonArgs_username]=m_identity:get_rsc_by_type( UserId,"Logon_store_username", Context),
-                    ?DEBUG(LogonArgs_username),
-                    [LogonArgs_password]=m_identity:get_rsc_by_type( UserId,"Logon_store_password", Context),
-                    ?DEBUG(LogonArgs_password),
-                    [LogonArgs_page]=m_identity:get_rsc_by_type( UserId,"Logon_store_page", Context),
-                    ?DEBUG(LogonArgs_page),
-
-
-
-                    Args=[{"triggervalue",[]},{"page",erlang:binary_to_list(proplists:get_value(key,LogonArgs_page))},{"handler","username"},{"username",erlang:binary_to_list(proplists:get_value(key,LogonArgs_username))},{"password",erlang:binary_to_list(proplists:get_value(key,LogonArgs_password))},{"rememberme",[]},{"z_v",erlang:binary_to_list(proplists:get_value(key,LogonArgs))}],
-                    ?DEBUG(Args),
-
-                    case z_notifier:first(#logon_submit{query_args=Args}, Context) of
-                        {ok, UserId} when is_integer(UserId) -> 
-                        controller_logon:logon_user(UserId, Context)
-                    end
-
+                          ContextLoggedon =controller_logon: logon_user(UserId, Context),
+                        controller_logon_using_mobile:delete_otp(UserId, ContextLoggedon),
+                        ContextLoggedon
             end;
-
             
         {_,_} ->
-            ?DEBUG(OTP1),
-            ?DEBUG(OTP2),
+           
             z_render:wire({redirect, [{location, "/logon/otp-form/error"  }]}, Context)
-            % logon_error("unequalOtp", Context)
-    end;
-
-event({submit, mobile_number_submitted , _FormId, _TagerId}, Context) ->
-	UserId1=z_context:get_q("UserId", Context),
-	{UserId,_}=string:to_integer(UserId1),
-
-	?DEBUG("in mobile event"),
- 	Mobile_number=erlang:list_to_binary(z_string:trim(z_context:get_q("mobile_number", Context))),
- 	?DEBUG(Mobile_number),
-
- 	send_mfa_otp(UserId, Context),
-	z_render:wire({redirect, [{location, "/logon/otp-form?UserId=" ++ erlang:integer_to_list(UserId) }]}, Context).
+    end.
 
 
 generate_otp()->
@@ -72,25 +43,6 @@ generate_otp1([Value|Tail])->
 		_Else	->Value*generate_otp1(Tail)
 	end.
 
-send_mfa_otp(Ids, Context) ->
-    case controller_logon:find_email(Ids, Context) of
-        undefined -> 
-            controller_logon:logon_error("reminder", Context);
-        Email -> 
-            case m_identity:get_username(Ids, Context) of
-                undefined ->
-                   controller_logon:logon_error("reminder", Context);
-                Username ->
-                    Vars = [
-                        {recipient_id, Ids},
-                        {id, Ids},
-                        {otp, set_otp(Ids,Context)},
-                        {username, Username},
-                        {email, Email}
-                    ],
-                    send_email_with_mfa_otp(Email, Vars, Context)
-            end
-    end.
 
 set_otp(Id, Context) ->
     Login_otp = generate_otp(),

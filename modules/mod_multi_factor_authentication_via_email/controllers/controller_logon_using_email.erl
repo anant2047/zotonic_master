@@ -4,7 +4,6 @@
 
 
 send_mfa(Ids, Context) ->
-	debugger:start(),
     case find_email(Ids, Context) of
         undefined -> 
             controller_logon:logon_error("reminder", Context);

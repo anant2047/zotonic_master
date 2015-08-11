@@ -39,11 +39,6 @@
 init(DispatchArgs) -> 
 {ok, DispatchArgs}.
 
-
-
-
-
-
 service_available(ReqData, DispatchArgs) when is_list(DispatchArgs) ->
     Context  = z_context:new(ReqData, ?MODULE),
     Context1 = z_context:set(DispatchArgs, Context),
@@ -102,9 +97,6 @@ provide_content(ReqData, Context) ->
     Context2 = z_context:set_resp_header("X-Robots-Tag", "noindex", Context1),
     Secret = z_context:get_q("secret", Context2),
     Uuid = z_context:get_q("uuid", Context2),
-
-   
-
     Vars = [
         {page, get_page(Context2)}
         | z_context:get_all(Context2)
@@ -130,8 +122,6 @@ provide_content(ReqData, Context) ->
     Context5 = z_context:set_resp_header("Location", AbsUrl, ContextLoggedon),
     ?WM_REPLY({halt, 302}, Context5);
 
-
-    
     undefined ->
             
             ErrorUId = z_context:get_q("error_uid", Context2),
@@ -218,8 +208,7 @@ event(#submit{message=[], form="password_reset"}, Context) ->
 
 %%event related to multi-factor authentication via uuid
 event(#submit{message=[], form="logon_verify"}, Context) ->
-    uuid = z_context:get_q("uuid", Context),
-    
+    uuid = z_context:get_q("uuid", Context),    
     {ok, UserId} = controller_logon_using_email:get_uuid(uuid, Context),
     
     case m_identity:get_username(UserId, Context) of
@@ -230,57 +219,6 @@ event(#submit{message=[], form="logon_verify"}, Context) ->
             controller_logon_using_email:delete_uuid(UserId, ContextLoggedon),
             ContextLoggedon
     end;
-
-%event related to multi-factor authentication via mobile phone
-
-event({submit, otp_form_verified, _FormId, _TagerId}, Context) ->
-   UserId1=z_context:get_q("UserId", Context),
-   {UserId,_}=string:to_integer(UserId1),
-
-    OTP1 = erlang:list_to_binary(z_string:trim(z_context:get_q("otp1", Context))),
-    OTP2 = controller_logon_using_mobile: get_otp( UserId,Context),
-
-    
-    case {OTP1,OTP2} of
-        {P,P} ->
-            case m_identity:get_username(UserId, Context) of
-                undefined ->
-                    throw({error, "User does not have an username defined."});
-                 _Else ->    
-           
-                    [LogonArgs]=m_identity:get_rsc_by_type( UserId,"Logon_store", Context),
-                    [LogonArgs_username]=m_identity:get_rsc_by_type( UserId,"Logon_store_username", Context),
-                    [LogonArgs_password]=m_identity:get_rsc_by_type( UserId,"Logon_store_password", Context),
-                    [LogonArgs_page]=m_identity:get_rsc_by_type( UserId,"Logon_store_page", Context),
-            
-                    Args=[{"triggervalue",[]},{"page",erlang:binary_to_list(proplists:get_value(key,LogonArgs_page))},			 {"handler","username"},{"username",erlang:binary_to_list(proplists:get_value(key,LogonArgs_username))},{"password",erlang:binary_to_list(proplists:get_value(key,LogonArgs_password))},{"rememberme",[]},{"z_v",erlang:binary_to_list(proplists:get_value(key,LogonArgs))}],
-
-
-                    case z_notifier:first(#logon_submit{query_args=Args}, Context) of
-                        {ok, UserId} when is_integer(UserId) -> 
-                        ContextLoggedon = logon_user(UserId, Context),
-                        controller_logon_using_mobile:delete_otp(UserId, ContextLoggedon),
-                        ContextLoggedon
-                    end
-
-            end;
-
-            
-        {_,_} ->
-           
-            z_render:wire({redirect, [{location, "/logon/otp-form/error"  }]}, Context)
-
-    end;
-
-
-event({submit, mobile_number_submitted , _FormId, _TagerId}, Context) ->
-
-z_module_manager:deactivate(mod_multi_factor_authentication_via_mobilePhone, Context),
-z:flush(),
-z_render:wire({redirect, [{location, "/logon" }]}, Context);
-
-
-
 
 event(#submit{message={logon_confirm, Args}, form="logon_confirm_form"}, Context) ->
 
@@ -304,7 +242,7 @@ event(#submit{message=[]}, Context) ->
  
     case z_notifier:first(#logon_submit{query_args=Args}, Context) of
         {ok, UserId} when is_integer(UserId) -> 
-
+          
             Mfa_variable_for_email=mod_multi_factor_authentication_via_email:check_activation(Context),
             case Mfa_variable_for_email of 
                 yes ->
@@ -315,27 +253,14 @@ event(#submit{message=[]}, Context) ->
                     Mfa_variable_for_otp=mod_multi_factor_authentication_via_mobilePhone:check_activation(Context),
                     case Mfa_variable_for_otp of 
                         yes ->
-                            %storing  values entered in login form so that they can be used while user enters correct otp in another page
-                            Store=proplists:get_value("z_v", Args),
-                            m_identity:set_by_type(UserId, "Logon_store",Store, Context),
-                            Store_username=proplists:get_value("username", Args),
-                            m_identity:set_by_type(UserId, "Logon_store_username",Store_username, Context),
-                            Store_password=proplists:get_value("password", Args),
-                            m_identity:set_by_type(UserId, "Logon_store_password",Store_password, Context),
-                            Store_page=proplists:get_value("page", Args),
-                            m_identity:set_by_type(UserId, "Logon_store_page",Store_page, Context),
-                         
 
                             Phone_number= proplists:get_value(phone_mobile, m_rsc:get(UserId,Context)),
                             case Phone_number of
                                 <<>> ->
-                                    % get mobile number from the user
-                                    z_render:wire({redirect, [{location, "/logon/mobile-number/submit?UserId=" ++ erlang:integer_to_list(UserId) }]}, Context);
+                                    logon_user(UserId, Context);
                                 _Else->
-                             
                                     % send the email to the user for mfa no need to take number it is already there in database
                                     send_mfa_otp(UserId, Context),
-        
                                     z_render:wire({redirect, [{location, "/logon/otp-form?UserId=" ++ erlang:integer_to_list(UserId) }]}, Context)
                             end;
                            
@@ -344,7 +269,6 @@ event(#submit{message=[]}, Context) ->
                     end
             end;
             
-
         {error, _Reason} -> 
             logon_error("pw", Context);
         {expired, UserId} when is_integer(UserId) ->
@@ -365,7 +289,7 @@ event(#z_msg_v1{data=Data}, Context) when is_list(Data) ->
     end.
 
 
-    send_mfa_otp(Ids, Context) ->
+send_mfa_otp(Ids, Context) ->
     case find_email(Ids, Context) of
         undefined -> 
             logon_error("reminder", Context);
@@ -387,7 +311,6 @@ event(#z_msg_v1{data=Data}, Context) when is_list(Data) ->
     end.
 
 logon_error(Reason, Context) ->
-
     Context1 = z_render:set_value("password", "", Context),
     Context2 = z_render:wire({add_class, [{target, "logon_box"}, {class, "logon_error"}]}, Context1),
     z_render:update("logon_error", z_template:render("_logon_error.tpl", [{reason, Reason}], Context2), Context2).
@@ -407,19 +330,13 @@ logon_stage(Stage, Args, Context) ->
     
 
 logon_user(UserId, Context) ->
-
-
     case z_auth:logon(UserId, Context) of
         {ok, ContextUser} ->
-       
             ContextRemember = case z_context:get_q("rememberme", ContextUser, []) of
-               
                 [] -> 
                 ContextUser,
-
                 set_rememberme_cookie(UserId, ContextUser)
             end,
-           
             z_render:wire(
                     {redirect, [{location, cleanup_url(get_ready_page(ContextRemember))}]}, 
                     ContextRemember);
@@ -599,12 +516,6 @@ send_email(Email, Vars, Context) ->
     z_email:send_render(Email, "email_password_reset.tpl", Vars, Context),
     ok.
 
-
-
-%% @doc Delete the uuid of the user
-
-
-
 %% @doc Set the unique reminder code for the account.
 set_reminder_secret(Id, Context) ->
     Code = z_ids:id(),
@@ -621,11 +532,3 @@ get_by_reminder_secret(Code, Context) ->
         undefined -> undefined;
         Row -> {ok, proplists:get_value(rsc_id, Row)}
     end.
-
-
-
-
-
-
-
-

@@ -2,9 +2,10 @@
 {% block content_area %}
 
 <div id="otp_form">
-  
-        {% wire id="otp_form1" type="submit" postback="otp_form_verified" delegate="controller_logon" %}
-        <form id="otp_form1" method="post" action="postback">
+    {% debug %}
+    <p> {{ UserId }} </p>
+        {% wire id="otp_form1" type="submit" postback="otp_form_verified" delegate="controller_logon_using_mobile" %}
+        <form id="otp_form1" method="post" action="postback" class="z_cookie_form">
 
         <h1 class="logon_header">{_ OTP has been sent to you _}</h1>
 
@@ -20,7 +21,6 @@
                 <div>
                 <button class="btn btn-primary btn-lg" type="submit">{_ Submit OTP_}</button>
                 </div>
-
             </div>
 
 
@@ -28,3 +28,4 @@
     </form>
 </div>
 {% endblock %}
+
