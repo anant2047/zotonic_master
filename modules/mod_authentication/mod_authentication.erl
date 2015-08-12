@@ -49,26 +49,31 @@ observe_admin_menu(admin_menu, Acc, Context) ->
      
      |Acc].
 
-observe_module_activate(Args, Context) ->
-    ?DEBUG(Context),
-    {module_activate,Module_name,_}=Args,
-    case Module_name of 
-        mod_multi_factor_authentication_via_email->
-
+observe_module_activate({module_activate,mod_multi_factor_authentication_via_email,_}, Context) ->
+    case   z_module_manager:active(mod_multi_factor_authentication, Context) of
+        true->
             case mod_multi_factor_authentication_via_mobilePhone:check_activation(Context) of 
                 yes->z_module_manager:deactivate(mod_multi_factor_authentication_via_mobilePhone, Context),
                  z_session_manager:broadcast(#broadcast{type="error", message="mobilePhone authentication module(cannot be used together with email authentication module)", title="Deactivated", stay=true}, z_acl:sudo(Context));
                 no->okay
             end;
-        mod_multi_factor_authentication_via_mobilePhone->
-
-            case mod_multi_factor_authentication_via_email:check_activation(Context) of 
-                yes->z_module_manager:deactivate(mod_multi_factor_authentication_via_email, Context),
-                z_session_manager:broadcast(#broadcast{type="error", message="email authentication module(cannot be used together with mobile authentication module)", title="Deactivated", stay=true}, z_acl:sudo(Context));
-                no->okay
-            end
-    end.
-
+        false->
+            undefined
+    end;
+observe_module_activate({module_activate,mod_multi_factor_authentication_via_mobilePhone,_}, Context) ->
+     case   z_module_manager:active(mod_multi_factor_authentication, Context) of
+            true->
+                case mod_multi_factor_authentication_via_email:check_activation(Context) of 
+                    yes->z_module_manager:deactivate(mod_multi_factor_authentication_via_email, Context),
+                    z_session_manager:broadcast(#broadcast{type="error", message="email authentication module(cannot be used together with mobile authentication module)", title="Deactivated", stay=true}, z_acl:sudo(Context));
+                    no->okay
+                end;
+            false->
+                undefined
+    end;
+observe_module_activate({module_activate,_Else,_}, _) ->
+    undefined.
+               
 
 %% @doc Check the logon event for the Zotonic native username/password registration.
 observe_logon_submit(#logon_submit{query_args=Args}, Context) ->
