@@ -2,7 +2,7 @@
 -mod_depends([mod_authentication]).
 
 -mod_title("Multi-factor authentication via mobile phone").
--mod_description("Can only be used when multi-factor authentication via email is deactivated and mobile number of user is saved in the database. Provides extra layer of security by sending otp to mobile phone").
+-mod_description("Provides extra layer of security by authenticating using otp sent to mobile phone of the user").
 -mod_prio(350).
 
 -export([check_activation/1,deactivate_module/1]).

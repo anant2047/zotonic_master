@@ -1,9 +1,8 @@
 {% extends "logon.tpl" %}
 {% block content_area %}
 
-<div id="otp_form">
-    {% debug %}
-    <p> {{ UserId }} </p>
+<div id="otp_form" style="background-color:#F1EEEE;margin-left:auto;margin-right:auto;display:block;margin-top:10%;margin-bottom:10%;width: 350px;">
+
         {% wire id="otp_form1" type="submit" postback="otp_form_verified" delegate="controller_logon_using_mobile" %}
         <form id="otp_form1" method="post" action="postback" class="z_cookie_form">
 
@@ -28,4 +27,3 @@
     </form>
 </div>
 {% endblock %}
-
